@@ -1,0 +1,31 @@
+# Data artifacts
+data/
+models/
+*.tif
+*.tiff
+*.npy
+*.pt
+*.pth
+*.h5
+*.gpkg
+*.shp
+*.shx
+*.dbf
+*.prj
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Secrets
+.env
+*.key
+credentials.json
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
