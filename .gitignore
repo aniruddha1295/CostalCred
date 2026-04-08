@@ -24,6 +24,7 @@ venv/
 .env
 *.key
 credentials.json
+ee-key.json
 
 # IDE
 .vscode/
