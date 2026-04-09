@@ -1,0 +1,88 @@
+{
+  "description": "IPCC Tier 1 carbon report from U-Net mangrove segmentation",
+  "model_checkpoint": "models/unet_best.pt",
+  "pixel_size_m": 10.0,
+  "tile_size": 256,
+  "tile_stride": 256,
+  "sites": {
+    "sundarbans": {
+      "baseline_year": 2020,
+      "current_year": 2024,
+      "baseline_stock": {
+        "hectares": 725736.3,
+        "biomass_t": 166919349.0,
+        "carbon_t": 78452094.03,
+        "co2e_t": 287657678.11
+      },
+      "current_stock": {
+        "hectares": 656833.74,
+        "biomass_t": 151071760.2,
+        "carbon_t": 71003727.294,
+        "co2e_t": 260347000.078
+      },
+      "flux": {
+        "baseline_hectares": 725736.3,
+        "current_hectares": 656833.74,
+        "delta_hectares": -68902.56,
+        "annual_flux_tco2e": -482317.92,
+        "total_flux_tco2e": -1929271.68,
+        "years": 4
+      }
+    },
+    "gulf_of_kutch": {
+      "baseline_year": 2020,
+      "current_year": 2024,
+      "baseline_stock": {
+        "hectares": 278263.3,
+        "biomass_t": 64000559.0,
+        "carbon_t": 30080262.73,
+        "co2e_t": 110294296.6767
+      },
+      "current_stock": {
+        "hectares": 251946.28,
+        "biomass_t": 57947644.4,
+        "carbon_t": 27235392.868,
+        "co2e_t": 99863107.1827
+      },
+      "flux": {
+        "baseline_hectares": 278263.3,
+        "current_hectares": 251946.28,
+        "delta_hectares": -26317.02,
+        "annual_flux_tco2e": -184219.14,
+        "total_flux_tco2e": -736876.56,
+        "years": 4
+      }
+    },
+    "pichavaram": {
+      "baseline_year": 2020,
+      "current_year": 2024,
+      "baseline_stock": {
+        "hectares": 654.95,
+        "biomass_t": 150638.5,
+        "carbon_t": 70800.095,
+        "co2e_t": 259600.3483
+      },
+      "current_stock": {
+        "hectares": 489.72,
+        "biomass_t": 112635.6,
+        "carbon_t": 52938.732,
+        "co2e_t": 194108.684
+      },
+      "flux": {
+        "baseline_hectares": 654.95,
+        "current_hectares": 489.72,
+        "delta_hectares": -165.23,
+        "annual_flux_tco2e": -1156.61,
+        "total_flux_tco2e": -4626.44,
+        "years": 4
+      }
+    }
+  },
+  "aggregate": {
+    "total_baseline_hectares": 1004654.55,
+    "total_current_hectares": 909269.74,
+    "total_delta_hectares": -95384.81,
+    "total_annual_flux_tco2e": -667693.67,
+    "total_flux_tco2e": -2670774.68
+  }
+}

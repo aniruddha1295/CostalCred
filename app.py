@@ -26,6 +26,13 @@ try:
 except ImportError:
     HAS_RASTERIO = False
 
+try:
+    import torch
+    import segmentation_models_pytorch as smp
+    HAS_UNET = True
+except ImportError:
+    HAS_UNET = False
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -54,7 +61,7 @@ PALETTE = [COLOR_OCEAN, COLOR_MANGROVE, COLOR_LIGHT, COLOR_ACCENT, COLOR_WARN]
 # Helpers
 # ---------------------------------------------------------------------------
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_json(path):
     if os.path.exists(path):
         with open(path) as f:
@@ -62,7 +69,7 @@ def load_json(path):
     return None
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_carbon_predictions():
     """Load pre-computed carbon predictions from results/carbon_predictions.json."""
     path = os.path.join(RESULTS_DIR, "carbon_predictions.json")
@@ -72,7 +79,7 @@ def load_carbon_predictions():
     return None
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_patch(patch_path):
     """Load a .npy patch (H, W, C) and its mask."""
     img = np.load(patch_path)
@@ -133,7 +140,7 @@ def patchify(data, patch_size=256):
     return patches
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_site_patches(site, year):
     """Load all img and mask patches for a site+year from data/patches/."""
     patch_dir = os.path.join(PATCHES_DIR, f"{site}_{year}")
@@ -153,7 +160,7 @@ def load_site_patches(site, year):
     return imgs, masks
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_xgb_model():
     """Load XGBoost model from disk."""
     model_path = os.path.join(MODELS_DIR, "xgboost_model.json")
@@ -190,6 +197,62 @@ def run_xgb_prediction(patches, model, progress_bar=None):
     return preds
 
 
+def load_unet_model():
+    """Load trained U-Net model from checkpoint."""
+    checkpoint_path = os.path.join(MODELS_DIR, "unet_best.pt")
+    if not os.path.exists(checkpoint_path):
+        return None
+    try:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        config = checkpoint.get("config", {})
+        model = smp.Unet(
+            encoder_name=config.get("encoder_name", "resnet18"),
+            encoder_weights=None,
+            in_channels=config.get("in_channels", 6),
+            classes=config.get("classes", 1),
+            decoder_use_batchnorm=True,
+        )
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.to(device)
+        model.eval()
+        return model, device
+    except Exception as e:
+        st.error(f"Error loading U-Net: {e}")
+        return None
+
+def run_unet_prediction(patches, model, device, progress=None):
+    """Run U-Net prediction on patches. Returns list of binary mask arrays."""
+    import json as _json
+    norm_path = os.path.join(SPLITS_DIR, "norm_stats.json")
+    if os.path.exists(norm_path):
+        with open(norm_path) as f:
+            stats = _json.load(f)
+        mean = np.array(stats["mean"]).reshape(6, 1, 1)
+        std = np.array(stats["std"]).reshape(6, 1, 1)
+    else:
+        mean, std = 0.0, 1.0
+
+    predictions = []
+    batch_size = 8
+    for i in range(0, len(patches), batch_size):
+        batch = patches[i:i+batch_size]
+        imgs = []
+        for p in batch:
+            img = p.astype(np.float32)
+            img = (img - mean) / (std + 1e-8)
+            imgs.append(img)
+        imgs_tensor = torch.from_numpy(np.stack(imgs)).float().to(device)
+        with torch.no_grad():
+            logits = model(imgs_tensor)
+            preds = (torch.sigmoid(logits) > 0.5).squeeze(1).cpu().numpy().astype(np.uint8)
+        for p in preds:
+            predictions.append(p)
+        if progress:
+            progress.progress(min((i + batch_size) / len(patches), 1.0))
+    return predictions
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
@@ -219,17 +282,23 @@ if page == "Carbon Prediction":
             site = st.selectbox("Select Site", ["sundarbans", "gulf_of_kutch", "pichavaram"],
                                 format_func=lambda s: SITE_DISPLAY.get(s, s))
         with col2:
-            model_choice = st.selectbox("Select Model", ["NDVI Threshold", "XGBoost"])
+            model_options = ["NDVI Threshold", "XGBoost"]
+            # Show U-Net if model file exists OR pre-computed predictions contain unet data
+            predictions_precheck = load_carbon_predictions()
+            has_unet_predictions = predictions_precheck is not None and "unet" in predictions_precheck
+            if has_unet_predictions or (HAS_UNET and os.path.exists(os.path.join(MODELS_DIR, "unet_best.pt"))):
+                model_options.append("U-Net")
+            model_choice = st.selectbox("Select Model", model_options)
 
         predict_button = st.button("Predict Carbon Credits", type="primary")
 
         if predict_button:
-            predictions = load_carbon_predictions()
+            predictions = predictions_precheck if predictions_precheck is not None else load_carbon_predictions()
             if predictions is None:
                 st.error("Pre-computed predictions not found. Run `python src/carbon/precompute_predictions.py` first.")
                 st.stop()
 
-            model_key = "ndvi" if model_choice == "NDVI Threshold" else "xgboost"
+            model_key = "ndvi" if model_choice == "NDVI Threshold" else ("unet" if model_choice == "U-Net" else "xgboost")
             site_data = predictions.get(model_key, {}).get(site, {})
 
             if not site_data or "2020" not in site_data or "2024" not in site_data:
@@ -371,7 +440,10 @@ if page == "Carbon Prediction":
 
         years_between = st.number_input("Years between images", min_value=1, max_value=20, value=4)
 
-        model_choice_upload = st.selectbox("Select Model", ["NDVI Threshold", "XGBoost"], key="upload_model")
+        upload_model_options = ["NDVI Threshold", "XGBoost"]
+        if HAS_UNET and os.path.exists(os.path.join(MODELS_DIR, "unet_best.pt")):
+            upload_model_options.append("U-Net")
+        model_choice_upload = st.selectbox("Select Model", upload_model_options, key="upload_model")
 
         predict_upload = st.button("Predict Carbon Credits", type="primary", key="predict_upload")
 
@@ -417,7 +489,7 @@ if page == "Carbon Prediction":
                     with st.spinner(f"Running NDVI threshold ({threshold:.2f}) on {total_patches} patches..."):
                         preds_bl = run_ndvi_prediction(patches_bl, threshold)
                         preds_cur = run_ndvi_prediction(patches_cur, threshold)
-                else:
+                elif model_choice_upload == "XGBoost":
                     if not HAS_XGB:
                         st.error("XGBoost is not installed. Install it with: pip install xgboost")
                         st.stop()
@@ -429,6 +501,16 @@ if page == "Carbon Prediction":
                     with st.spinner(f"Running XGBoost on {total_patches} patches..."):
                         preds_bl = run_xgb_prediction(patches_bl, xgb_model, progress)
                         preds_cur = run_xgb_prediction(patches_cur, xgb_model, progress)
+                elif model_choice_upload == "U-Net":
+                    result = load_unet_model()
+                    if result is None:
+                        st.error("U-Net model not found. Train it first.")
+                        st.stop()
+                    unet_model, device = result
+                    progress = st.progress(0, text="Running U-Net prediction (baseline)...")
+                    preds_bl = run_unet_prediction(patches_bl, unet_model, device, progress)
+                    progress = st.progress(0, text="Running U-Net prediction (current)...")
+                    preds_cur = run_unet_prediction(patches_cur, unet_model, device, progress)
 
                 st.success("Prediction complete!")
 
@@ -539,7 +621,8 @@ elif page == "Overview":
     with c2:
         metric_card("Sites", "3")
     with c3:
-        metric_card("Models Trained", "2 / 3")
+        _trained = sum(1 for f in ["ndvi.json", "xgboost.json", "unet.json"] if os.path.exists(os.path.join(RESULTS_DIR, f)))
+        metric_card("Models Trained", f"{_trained} / 3")
 
     st.markdown("---")
 
