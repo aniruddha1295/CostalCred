@@ -1,0 +1,198 @@
+{
+  "ndvi": {
+    "sundarbans": {
+      "2020": {
+        "total_patches": 5815,
+        "total_pixels": 381091840,
+        "predicted_mangrove_pixels": 122257191,
+        "gt_mangrove_pixels": 179569880,
+        "predicted_hectares": 1222571.91,
+        "predicted_stock_tco2e": 484586752.73,
+        "gt_hectares": 1795698.8,
+        "gt_stock_tco2e": 711755147.69,
+        "mangrove_fraction": 0.3208
+      },
+      "2024": {
+        "total_patches": 5815,
+        "total_pixels": 381091840,
+        "predicted_mangrove_pixels": 135764366,
+        "gt_mangrove_pixels": 179569880,
+        "predicted_hectares": 1357643.66,
+        "predicted_stock_tco2e": 538124692.04,
+        "gt_hectares": 1795698.8,
+        "gt_stock_tco2e": 711755147.69,
+        "mangrove_fraction": 0.3563
+      },
+      "carbon_flux": {
+        "baseline_ha_2020": 1222571.91,
+        "current_ha_2024": 1357643.66,
+        "delta_ha": 135071.75,
+        "annual_flux_tco2e": 945502.25,
+        "total_flux_tco2e_4yr": 3782009.0,
+        "years": 4
+      }
+    },
+    "gulf_of_kutch": {
+      "2020": {
+        "total_patches": 1267,
+        "total_pixels": 83034112,
+        "predicted_mangrove_pixels": 3374540,
+        "gt_mangrove_pixels": 9194090,
+        "predicted_hectares": 33745.4,
+        "predicted_stock_tco2e": 13375551.71,
+        "gt_hectares": 91940.9,
+        "gt_stock_tco2e": 36442308.06,
+        "mangrove_fraction": 0.0406
+      },
+      "2024": {
+        "total_patches": 1267,
+        "total_pixels": 83034112,
+        "predicted_mangrove_pixels": 3253047,
+        "gt_mangrove_pixels": 9194090,
+        "predicted_hectares": 32530.47,
+        "predicted_stock_tco2e": 12893993.96,
+        "gt_hectares": 91940.9,
+        "gt_stock_tco2e": 36442308.06,
+        "mangrove_fraction": 0.0392
+      },
+      "carbon_flux": {
+        "baseline_ha_2020": 33745.4,
+        "current_ha_2024": 32530.47,
+        "delta_ha": -1214.93,
+        "annual_flux_tco2e": -8504.51,
+        "total_flux_tco2e_4yr": -34018.04,
+        "years": 4
+      }
+    },
+    "pichavaram": {
+      "2020": {
+        "total_patches": 71,
+        "total_pixels": 4653056,
+        "predicted_mangrove_pixels": 661943,
+        "gt_mangrove_pixels": 580510,
+        "predicted_hectares": 6619.43,
+        "predicted_stock_tco2e": 2623721.4,
+        "gt_hectares": 5805.1,
+        "gt_stock_tco2e": 2300948.14,
+        "mangrove_fraction": 0.1423
+      },
+      "2024": {
+        "total_patches": 71,
+        "total_pixels": 4653056,
+        "predicted_mangrove_pixels": 826554,
+        "gt_mangrove_pixels": 580510,
+        "predicted_hectares": 8265.54,
+        "predicted_stock_tco2e": 3276184.54,
+        "gt_hectares": 5805.1,
+        "gt_stock_tco2e": 2300948.14,
+        "mangrove_fraction": 0.1776
+      },
+      "carbon_flux": {
+        "baseline_ha_2020": 6619.43,
+        "current_ha_2024": 8265.54,
+        "delta_ha": 1646.11,
+        "annual_flux_tco2e": 11522.77,
+        "total_flux_tco2e_4yr": 46091.08,
+        "years": 4
+      }
+    }
+  },
+  "xgboost": {
+    "sundarbans": {
+      "2020": {
+        "total_patches": 5815,
+        "total_pixels": 381091840,
+        "predicted_mangrove_pixels": 245727986,
+        "gt_mangrove_pixels": 179569880,
+        "predicted_hectares": 2457279.86,
+        "predicted_stock_tco2e": 973983827.18,
+        "gt_hectares": 1795698.8,
+        "gt_stock_tco2e": 711755147.69,
+        "mangrove_fraction": 0.6448
+      },
+      "2024": {
+        "total_patches": 5815,
+        "total_pixels": 381091840,
+        "predicted_mangrove_pixels": 233728792,
+        "gt_mangrove_pixels": 179569880,
+        "predicted_hectares": 2337287.92,
+        "predicted_stock_tco2e": 926423021.89,
+        "gt_hectares": 1795698.8,
+        "gt_stock_tco2e": 711755147.69,
+        "mangrove_fraction": 0.6133
+      },
+      "carbon_flux": {
+        "baseline_ha_2020": 2457279.86,
+        "current_ha_2024": 2337287.92,
+        "delta_ha": -119991.94,
+        "annual_flux_tco2e": -839943.58,
+        "total_flux_tco2e_4yr": -3359774.32,
+        "years": 4
+      }
+    },
+    "gulf_of_kutch": {
+      "2020": {
+        "total_patches": 1267,
+        "total_pixels": 83034112,
+        "predicted_mangrove_pixels": 41541523,
+        "gt_mangrove_pixels": 9194090,
+        "predicted_hectares": 415415.23,
+        "predicted_stock_tco2e": 164656750.0,
+        "gt_hectares": 91940.9,
+        "gt_stock_tco2e": 36442308.06,
+        "mangrove_fraction": 0.5003
+      },
+      "2024": {
+        "total_patches": 1267,
+        "total_pixels": 83034112,
+        "predicted_mangrove_pixels": 37776794,
+        "gt_mangrove_pixels": 9194090,
+        "predicted_hectares": 377767.94,
+        "predicted_stock_tco2e": 149734619.15,
+        "gt_hectares": 91940.9,
+        "gt_stock_tco2e": 36442308.06,
+        "mangrove_fraction": 0.455
+      },
+      "carbon_flux": {
+        "baseline_ha_2020": 415415.23,
+        "current_ha_2024": 377767.94,
+        "delta_ha": -37647.29,
+        "annual_flux_tco2e": -263531.03,
+        "total_flux_tco2e_4yr": -1054124.12,
+        "years": 4
+      }
+    },
+    "pichavaram": {
+      "2020": {
+        "total_patches": 71,
+        "total_pixels": 4653056,
+        "predicted_mangrove_pixels": 1027105,
+        "gt_mangrove_pixels": 580510,
+        "predicted_hectares": 10271.05,
+        "predicted_stock_tco2e": 4071101.85,
+        "gt_hectares": 5805.1,
+        "gt_stock_tco2e": 2300948.14,
+        "mangrove_fraction": 0.2207
+      },
+      "2024": {
+        "total_patches": 71,
+        "total_pixels": 4653056,
+        "predicted_mangrove_pixels": 768983,
+        "gt_mangrove_pixels": 580510,
+        "predicted_hectares": 7689.83,
+        "predicted_stock_tco2e": 3047992.28,
+        "gt_hectares": 5805.1,
+        "gt_stock_tco2e": 2300948.14,
+        "mangrove_fraction": 0.1653
+      },
+      "carbon_flux": {
+        "baseline_ha_2020": 10271.05,
+        "current_ha_2024": 7689.83,
+        "delta_ha": -2581.22,
+        "annual_flux_tco2e": -18068.54,
+        "total_flux_tco2e_4yr": -72274.16,
+        "years": 4
+      }
+    }
+  }
+}

@@ -12,7 +12,7 @@
     "iou": 0.676,
     "f1": 0.8067
   },
-  "training_time_sec": 4.47,
+  "training_time_sec": 2.79,
   "n_estimators_used": 287,
   "scale_pos_weight": 1.47,
   "feature_importance": {

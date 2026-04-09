@@ -12,6 +12,19 @@ import plotly.express as px
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 import glob as glob_mod
+import tempfile
+
+try:
+    import xgboost as xgb
+    HAS_XGB = True
+except ImportError:
+    HAS_XGB = False
+
+try:
+    import rasterio
+    HAS_RASTERIO = True
+except ImportError:
+    HAS_RASTERIO = False
 
 # ---------------------------------------------------------------------------
 # Config
@@ -27,6 +40,7 @@ RESULTS_DIR = os.path.join(BASE_DIR, "results")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 SPLITS_DIR = os.path.join(DATA_DIR, "splits")
 PATCHES_DIR = os.path.join(DATA_DIR, "patches")
+MODELS_DIR = os.path.join(BASE_DIR, "models")
 
 # Theme colours
 COLOR_OCEAN = "#0077B6"
@@ -49,6 +63,16 @@ def load_json(path):
 
 
 @st.cache_data
+def load_carbon_predictions():
+    """Load pre-computed carbon predictions from results/carbon_predictions.json."""
+    path = os.path.join(RESULTS_DIR, "carbon_predictions.json")
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return None
+
+
+@st.cache_data
 def load_patch(patch_path):
     """Load a .npy patch (H, W, C) and its mask."""
     img = np.load(patch_path)
@@ -62,6 +86,111 @@ def metric_card(label, value, delta=None):
 
 
 # ---------------------------------------------------------------------------
+# Carbon Prediction helpers
+# ---------------------------------------------------------------------------
+
+SITE_DISPLAY = {
+    "sundarbans": "Sundarbans (West Bengal)",
+    "gulf_of_kutch": "Gulf of Kutch (Gujarat)",
+    "pichavaram": "Pichavaram (Tamil Nadu)",
+}
+
+BIOMASS_DENSITY = 230.0
+CARBON_FRACTION = 0.47
+CO2_TO_C_RATIO = 44.0 / 12.0
+ANNUAL_SEQUESTRATION = 7.0
+
+
+def extract_features_inline(img):
+    """Extract 10 per-pixel features from a (6, H, W) patch."""
+    B2, B3, B4, B8, B11, B12 = img[0], img[1], img[2], img[3], img[4], img[5]
+    ndvi = (B8 - B4) / (B8 + B4 + 1e-8)
+    evi = 2.5 * (B8 - B4) / (B8 + 6.0 * B4 - 7.5 * B2 + 1.0)
+    ndwi = (B3 - B8) / (B3 + B8 + 1e-8)
+    savi = 1.5 * (B8 - B4) / (B8 + B4 + 0.5)
+    h, w = B2.shape
+    features = np.stack([B2, B3, B4, B8, B11, B12, ndvi, evi, ndwi, savi], axis=0)
+    features = features.reshape(10, h * w).T
+    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+    return features.astype(np.float32)
+
+
+def compute_carbon(mask, pixel_size_m=10.0):
+    """IPCC Tier 1 carbon stock from a binary mask."""
+    pixel_area_ha = (pixel_size_m ** 2) / 10000.0
+    hectares = float(np.sum(mask > 0)) * pixel_area_ha
+    stock = hectares * BIOMASS_DENSITY * CARBON_FRACTION * CO2_TO_C_RATIO
+    return hectares, stock
+
+
+def patchify(data, patch_size=256):
+    """Cut a (C, H, W) array into non-overlapping patches."""
+    C, H, W = data.shape
+    patches = []
+    for y in range(0, H - patch_size + 1, patch_size):
+        for x in range(0, W - patch_size + 1, patch_size):
+            patches.append(data[:, y:y+patch_size, x:x+patch_size])
+    return patches
+
+
+@st.cache_data
+def load_site_patches(site, year):
+    """Load all img and mask patches for a site+year from data/patches/."""
+    patch_dir = os.path.join(PATCHES_DIR, f"{site}_{year}")
+    imgs, masks = [], []
+    if not os.path.isdir(patch_dir):
+        return imgs, masks
+    img_files = sorted([f for f in os.listdir(patch_dir) if f.startswith("img_") and f.endswith(".npy")])
+    for fname in img_files:
+        img = np.load(os.path.join(patch_dir, fname))
+        imgs.append(img)
+        mask_fname = fname.replace("img_", "mask_")
+        mask_path = os.path.join(patch_dir, mask_fname)
+        if os.path.exists(mask_path):
+            masks.append(np.load(mask_path))
+        else:
+            masks.append(np.zeros(img.shape[1:], dtype=np.uint8))
+    return imgs, masks
+
+
+@st.cache_data
+def load_xgb_model():
+    """Load XGBoost model from disk."""
+    model_path = os.path.join(MODELS_DIR, "xgboost_model.json")
+    if not os.path.exists(model_path):
+        return None
+    if not HAS_XGB:
+        return None
+    model = xgb.XGBClassifier()
+    model.load_model(model_path)
+    return model
+
+
+def run_ndvi_prediction(patches, threshold):
+    """Run NDVI threshold prediction on a list of (6, H, W) patches."""
+    preds = []
+    for img in patches:
+        ndvi = (img[3] - img[2]) / (img[3] + img[2] + 1e-8)
+        pred = (ndvi > threshold).astype(np.uint8)
+        preds.append(pred)
+    return preds
+
+
+def run_xgb_prediction(patches, model, progress_bar=None):
+    """Run XGBoost prediction on a list of (6, H, W) patches."""
+    preds = []
+    total = len(patches)
+    for i, img in enumerate(patches):
+        feats = extract_features_inline(img)
+        pred_flat = model.predict(feats)
+        pred = pred_flat.reshape(img.shape[1], img.shape[2]).astype(np.uint8)
+        preds.append(pred)
+        if progress_bar is not None:
+            progress_bar.progress((i + 1) / total)
+    return preds
+
+
+# ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
@@ -70,15 +199,329 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio(
         "Navigation",
-        ["Overview", "Model Comparison", "XGBoost Analysis", "Data Explorer", "Satellite Imagery"],
+        ["Carbon Prediction", "Overview", "Model Comparison", "XGBoost Analysis", "Data Explorer", "Satellite Imagery"],
     )
     st.markdown("---")
     st.caption("Sem VI Mini Project -- RCOEM Dept. of Data Science")
 
 # ---------------------------------------------------------------------------
+# Page 0: Carbon Prediction
+# ---------------------------------------------------------------------------
+if page == "Carbon Prediction":
+    st.header("Carbon Credit Prediction")
+    st.markdown("Predict mangrove cover and estimate carbon credits using IPCC Tier 1 methodology")
+
+    mode = st.radio("Mode", ["Pre-loaded Sites", "Upload GeoTIFF"], horizontal=True)
+
+    if mode == "Pre-loaded Sites":
+        col1, col2 = st.columns(2)
+        with col1:
+            site = st.selectbox("Select Site", ["sundarbans", "gulf_of_kutch", "pichavaram"],
+                                format_func=lambda s: SITE_DISPLAY.get(s, s))
+        with col2:
+            model_choice = st.selectbox("Select Model", ["NDVI Threshold", "XGBoost"])
+
+        predict_button = st.button("Predict Carbon Credits", type="primary")
+
+        if predict_button:
+            predictions = load_carbon_predictions()
+            if predictions is None:
+                st.error("Pre-computed predictions not found. Run `python src/carbon/precompute_predictions.py` first.")
+                st.stop()
+
+            model_key = "ndvi" if model_choice == "NDVI Threshold" else "xgboost"
+            site_data = predictions.get(model_key, {}).get(site, {})
+
+            if not site_data or "2020" not in site_data or "2024" not in site_data:
+                st.error(f"No pre-computed data for {SITE_DISPLAY[site]} with {model_choice}. Re-run precompute script.")
+                st.stop()
+
+            baseline = site_data["2020"]
+            current = site_data["2024"]
+            flux = site_data.get("carbon_flux", {})
+
+            baseline_ha = flux.get("baseline_ha_2020", baseline["predicted_hectares"])
+            current_ha = flux.get("current_ha_2024", current["predicted_hectares"])
+            delta_ha = flux.get("delta_ha", current_ha - baseline_ha)
+            total_flux = flux.get("total_flux_tco2e_4yr", delta_ha * ANNUAL_SEQUESTRATION * 4)
+            baseline_stock = baseline["predicted_stock_tco2e"]
+            current_stock = current["predicted_stock_tco2e"]
+
+            site_display = SITE_DISPLAY.get(site, site)
+
+            st.success("Prediction loaded instantly from cache!")
+
+            # Row 1 -- Metric cards
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("Baseline Area (2020)", f"{baseline_ha:.1f} ha")
+            with c2:
+                st.metric("Current Area (2024)", f"{current_ha:.1f} ha")
+            with c3:
+                st.metric("Area Change", f"{delta_ha:+.1f} ha")
+            with c4:
+                st.metric("Carbon Credits (4yr)", f"{total_flux:+,.0f} tCO\u2082e")
+
+            st.markdown("---")
+
+            # Row 2 -- Side-by-side visualizations from saved samples
+            st.subheader("Sample Patch Predictions")
+            sample_dir_2020 = os.path.join(RESULTS_DIR, "samples", model_key, f"{site}_2020")
+            sample_dir_2024 = os.path.join(RESULTS_DIR, "samples", model_key, f"{site}_2024")
+
+            has_2020_samples = os.path.isdir(sample_dir_2020)
+            has_2024_samples = os.path.isdir(sample_dir_2024)
+
+            if has_2020_samples or has_2024_samples:
+                # Count available samples
+                n_samples_2020 = len([f for f in os.listdir(sample_dir_2020) if f.startswith("rgb_")]) if has_2020_samples else 0
+                n_samples_2024 = len([f for f in os.listdir(sample_dir_2024) if f.startswith("rgb_")]) if has_2024_samples else 0
+                n_vis = min(3, max(n_samples_2020, n_samples_2024))
+
+                if n_vis > 0:
+                    fig, axes = plt.subplots(n_vis, 2, figsize=(12, 5 * n_vis))
+                    if n_vis == 1:
+                        axes = axes.reshape(1, 2)
+
+                    for row in range(n_vis):
+                        # 2020 column
+                        if row < n_samples_2020:
+                            rgb_2020 = np.load(os.path.join(sample_dir_2020, f"rgb_{row}.npy"))
+                            pred_2020 = np.load(os.path.join(sample_dir_2020, f"pred_{row}.npy"))
+                            axes[row, 0].imshow(rgb_2020)
+                            mask_overlay = np.zeros((*pred_2020.shape, 4))
+                            mask_overlay[pred_2020 == 1] = [0, 1, 0, 0.35]
+                            axes[row, 0].imshow(mask_overlay)
+                            axes[row, 0].set_title(f"2020 -- Sample {row+1}")
+                        else:
+                            axes[row, 0].text(0.5, 0.5, "N/A", ha="center", va="center", transform=axes[row, 0].transAxes)
+                            axes[row, 0].set_title("2020 -- N/A")
+                        axes[row, 0].axis('off')
+
+                        # 2024 column
+                        if row < n_samples_2024:
+                            rgb_2024 = np.load(os.path.join(sample_dir_2024, f"rgb_{row}.npy"))
+                            pred_2024 = np.load(os.path.join(sample_dir_2024, f"pred_{row}.npy"))
+                            axes[row, 1].imshow(rgb_2024)
+                            mask_overlay = np.zeros((*pred_2024.shape, 4))
+                            mask_overlay[pred_2024 == 1] = [0, 1, 0, 0.35]
+                            axes[row, 1].imshow(mask_overlay)
+                            axes[row, 1].set_title(f"2024 -- Sample {row+1}")
+                        else:
+                            axes[row, 1].text(0.5, 0.5, "N/A", ha="center", va="center", transform=axes[row, 1].transAxes)
+                            axes[row, 1].set_title("2024 -- N/A")
+                        axes[row, 1].axis('off')
+
+                    fig.suptitle(f"{site_display} -- Mangrove Predictions ({model_choice})", fontsize=14)
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    plt.close(fig)
+            else:
+                st.info("No sample visualizations saved. Re-run precompute script to generate them.")
+
+            st.markdown("---")
+
+            # Row 3 -- Detailed Carbon Report table
+            st.subheader("Carbon Credit Report")
+            report_data = {
+                "Metric": [
+                    "Mangrove Area (2020)", "Mangrove Area (2024)", "Area Change",
+                    "Carbon Stock (2020)", "Carbon Stock (2024)",
+                    "Annual Sequestration", "Total Carbon Credits (4yr)",
+                    "Total Patches (2020)", "Total Patches (2024)",
+                    "Mangrove Fraction (2024)",
+                ],
+                "Value": [
+                    f"{baseline_ha:.2f} ha", f"{current_ha:.2f} ha", f"{delta_ha:+.2f} ha",
+                    f"{baseline_stock:,.0f} tCO\u2082e", f"{current_stock:,.0f} tCO\u2082e",
+                    f"{delta_ha * 7.0:+,.0f} tCO\u2082e/yr", f"{total_flux:+,.0f} tCO\u2082e",
+                    str(baseline.get("total_patches", "N/A")),
+                    str(current.get("total_patches", "N/A")),
+                    f"{current.get('mangrove_fraction', 0) * 100:.2f}%",
+                ]
+            }
+            st.dataframe(pd.DataFrame(report_data), use_container_width=True, hide_index=True)
+
+            # Row 4 -- IPCC methodology explanation
+            with st.expander("IPCC Tier 1 Methodology"):
+                st.markdown("""
+                **Constants (IPCC 2013 Wetlands Supplement):**
+                - Biomass density: 230 t/ha (dry matter)
+                - Carbon fraction: 0.47
+                - CO\u2082:C ratio: 44/12 \u2248 3.667
+                - Annual sequestration: 7.0 tCO\u2082e/ha/year
+
+                **Stock formula:** hectares \u00d7 230 \u00d7 0.47 \u00d7 3.667 = tCO\u2082e
+
+                **Flux formula:** (current_ha \u2212 baseline_ha) \u00d7 7.0 \u00d7 years = tCO\u2082e credits
+                """)
+
+    else:
+        # Upload GeoTIFF mode
+        if not HAS_RASTERIO:
+            st.error("rasterio is not installed. Install it with: pip install rasterio")
+            st.stop()
+
+        st.info("Upload two Sentinel-2 GeoTIFF composites (6 bands: B2, B3, B4, B8, B11, B12)")
+        col1, col2 = st.columns(2)
+        with col1:
+            baseline_file = st.file_uploader("Baseline Year GeoTIFF", type=["tif", "tiff"], key="baseline")
+        with col2:
+            current_file = st.file_uploader("Current Year GeoTIFF", type=["tif", "tiff"], key="current")
+
+        years_between = st.number_input("Years between images", min_value=1, max_value=20, value=4)
+
+        model_choice_upload = st.selectbox("Select Model", ["NDVI Threshold", "XGBoost"], key="upload_model")
+
+        predict_upload = st.button("Predict Carbon Credits", type="primary", key="predict_upload")
+
+        if predict_upload:
+            if baseline_file is None or current_file is None:
+                st.error("Please upload both baseline and current year GeoTIFFs.")
+                st.stop()
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # Save uploaded files
+                baseline_path = os.path.join(tmpdir, "baseline.tif")
+                current_path = os.path.join(tmpdir, "current.tif")
+                with open(baseline_path, "wb") as f:
+                    f.write(baseline_file.getbuffer())
+                with open(current_path, "wb") as f:
+                    f.write(current_file.getbuffer())
+
+                # Read with rasterio
+                with st.spinner("Reading GeoTIFFs..."):
+                    with rasterio.open(baseline_path) as src:
+                        baseline_data = src.read().astype(np.float32) / 10000.0
+                        pixel_size = src.res[0]
+                    with rasterio.open(current_path) as src:
+                        current_data = src.read().astype(np.float32) / 10000.0
+
+                # Cut into patches
+                patches_bl = patchify(baseline_data)
+                patches_cur = patchify(current_data)
+
+                if not patches_bl and not patches_cur:
+                    st.error("Images are too small to extract 256x256 patches.")
+                    st.stop()
+
+                total_patches = len(patches_bl) + len(patches_cur)
+
+                # Run model
+                if model_choice_upload == "NDVI Threshold":
+                    ndvi_results = load_json(os.path.join(RESULTS_DIR, "ndvi.json"))
+                    if ndvi_results is None:
+                        st.error("results/ndvi.json not found. Run NDVI evaluation first.")
+                        st.stop()
+                    threshold = ndvi_results.get("best_threshold", 0.3)
+                    with st.spinner(f"Running NDVI threshold ({threshold:.2f}) on {total_patches} patches..."):
+                        preds_bl = run_ndvi_prediction(patches_bl, threshold)
+                        preds_cur = run_ndvi_prediction(patches_cur, threshold)
+                else:
+                    if not HAS_XGB:
+                        st.error("XGBoost is not installed. Install it with: pip install xgboost")
+                        st.stop()
+                    xgb_model = load_xgb_model()
+                    if xgb_model is None:
+                        st.error("models/xgboost_model.json not found. Train XGBoost first.")
+                        st.stop()
+                    progress = st.progress(0)
+                    with st.spinner(f"Running XGBoost on {total_patches} patches..."):
+                        preds_bl = run_xgb_prediction(patches_bl, xgb_model, progress)
+                        preds_cur = run_xgb_prediction(patches_cur, xgb_model, progress)
+
+                st.success("Prediction complete!")
+
+                # Stitch and compute carbon
+                all_bl = np.concatenate([p.flatten() for p in preds_bl]) if preds_bl else np.array([])
+                all_cur = np.concatenate([p.flatten() for p in preds_cur]) if preds_cur else np.array([])
+
+                baseline_ha, baseline_stock = compute_carbon(all_bl, pixel_size_m=pixel_size) if len(all_bl) > 0 else (0.0, 0.0)
+                current_ha, current_stock = compute_carbon(all_cur, pixel_size_m=pixel_size) if len(all_cur) > 0 else (0.0, 0.0)
+                delta_ha = current_ha - baseline_ha
+                total_flux = delta_ha * ANNUAL_SEQUESTRATION * years_between
+
+                # Metric cards
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.metric("Baseline Area", f"{baseline_ha:.2f} ha")
+                with c2:
+                    st.metric("Current Area", f"{current_ha:.2f} ha")
+                with c3:
+                    st.metric("Area Change", f"{delta_ha:+.2f} ha")
+                with c4:
+                    st.metric("Carbon Credits", f"{total_flux:+,.0f} tCO\u2082e")
+
+                st.markdown("---")
+
+                # Visualizations
+                st.subheader("Sample Patch Predictions")
+                rng = np.random.RandomState(42)
+                n_vis_bl = min(3, len(patches_bl))
+                n_vis_cur = min(3, len(patches_cur))
+                n_vis = max(n_vis_bl, n_vis_cur)
+
+                if n_vis > 0:
+                    idx_bl = rng.choice(len(patches_bl), size=n_vis_bl, replace=False) if n_vis_bl > 0 else []
+                    idx_cur = rng.choice(len(patches_cur), size=n_vis_cur, replace=False) if n_vis_cur > 0 else []
+
+                    fig, axes = plt.subplots(n_vis, 2, figsize=(12, 5 * n_vis))
+                    if n_vis == 1:
+                        axes = axes.reshape(1, 2)
+                    for row in range(n_vis):
+                        if row < n_vis_bl:
+                            img_bl = patches_bl[idx_bl[row]]
+                            rgb_bl = np.clip(img_bl[[2, 1, 0]].transpose(1, 2, 0) / 0.3, 0, 1)
+                            axes[row, 0].imshow(rgb_bl)
+                            axes[row, 0].imshow(preds_bl[idx_bl[row]], alpha=0.3, cmap='Greens')
+                            axes[row, 0].set_title(f"Baseline -- Patch {row+1}")
+                        else:
+                            axes[row, 0].text(0.5, 0.5, "N/A", ha="center", va="center", transform=axes[row, 0].transAxes)
+                        axes[row, 0].axis('off')
+                        if row < n_vis_cur:
+                            img_cur = patches_cur[idx_cur[row]]
+                            rgb_cur = np.clip(img_cur[[2, 1, 0]].transpose(1, 2, 0) / 0.3, 0, 1)
+                            axes[row, 1].imshow(rgb_cur)
+                            axes[row, 1].imshow(preds_cur[idx_cur[row]], alpha=0.3, cmap='Greens')
+                            axes[row, 1].set_title(f"Current -- Patch {row+1}")
+                        else:
+                            axes[row, 1].text(0.5, 0.5, "N/A", ha="center", va="center", transform=axes[row, 1].transAxes)
+                        axes[row, 1].axis('off')
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    plt.close(fig)
+
+                st.markdown("---")
+
+                # Carbon report table
+                st.subheader("Carbon Credit Report")
+                report_data = {
+                    "Metric": ["Mangrove Area (Baseline)", "Mangrove Area (Current)", "Area Change",
+                                "Carbon Stock (Baseline)", "Carbon Stock (Current)",
+                                "Annual Sequestration", f"Total Carbon Credits ({years_between}yr)"],
+                    "Value": [f"{baseline_ha:.2f} ha", f"{current_ha:.2f} ha", f"{delta_ha:+.2f} ha",
+                              f"{baseline_stock:,.0f} tCO\u2082e", f"{current_stock:,.0f} tCO\u2082e",
+                              f"{delta_ha * 7.0:+,.0f} tCO\u2082e/yr", f"{total_flux:+,.0f} tCO\u2082e"]
+                }
+                st.dataframe(pd.DataFrame(report_data), use_container_width=True, hide_index=True)
+
+                with st.expander("IPCC Tier 1 Methodology"):
+                    st.markdown("""
+                    **Constants (IPCC 2013 Wetlands Supplement):**
+                    - Biomass density: 230 t/ha (dry matter)
+                    - Carbon fraction: 0.47
+                    - CO\u2082:C ratio: 44/12 \u2248 3.667
+                    - Annual sequestration: 7.0 tCO\u2082e/ha/year
+
+                    **Stock formula:** hectares \u00d7 230 \u00d7 0.47 \u00d7 3.667 = tCO\u2082e
+
+                    **Flux formula:** (current_ha \u2212 baseline_ha) \u00d7 7.0 \u00d7 years = tCO\u2082e credits
+                    """)
+
+# ---------------------------------------------------------------------------
 # Page 1: Overview
 # ---------------------------------------------------------------------------
-if page == "Overview":
+elif page == "Overview":
     st.title("CoastalCred -- Blue Carbon MRV Dashboard")
     st.markdown(
         "A blockchain-based blue carbon registry and MRV system focused on "
