@@ -24,8 +24,8 @@ import urllib.request
 # ---------------------------------------------------------------------------
 # Configuration — update these after creating the GitHub repo
 # ---------------------------------------------------------------------------
-GITHUB_OWNER = "CoastalCred"  # GitHub org or username
-GITHUB_REPO = "coastalcred"  # Repository name
+GITHUB_OWNER = "aniruddha1295"  # GitHub org or username
+GITHUB_REPO = "CostalCred"  # Repository name
 DEFAULT_TAG = "v0.1-raw-data"
 MODEL_TAG = "v0.2-trained-models"
 
