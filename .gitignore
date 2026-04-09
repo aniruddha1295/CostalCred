@@ -1,6 +1,6 @@
 # Data artifacts
 data/
-models/
+/models/
 *.tif
 *.tiff
 *.npy
