@@ -1,4 +1,4 @@
-# CoastalCred — Blockchain-Based Blue Carbon Registry & MRV System
+# CoastalCred — Blockchain-Based Blue Carbon Registry & MRV System.
 
 > Sem VI Mini Project | RCOEM Dept. of Data Science, Nagpur
 > Guide: Dr. Aarti Karandikar | Industry Mentor: Rishikesh Kale (Filecoin/Protocol Labs)
