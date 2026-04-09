@@ -80,7 +80,7 @@ Data artifacts are **not** checked into Git (see `.gitignore`). They are distrib
 
 **Years:** 2020 (baseline) and 2024 (current) -- two-point flux measurement.
 
-**Bands:** B2 (Blue), B3 (Green), B4 (Red), B8 (NIR), B11 (SWIR1), B12 (SWIR2) at 10m resolution.
+**Bands:** B2 (Blue), B3 (Green), B4 (Red), B8 (NIR), B11 (SWIR1), B12 (SWIR2) at 10m resolutions.
 
 **Labels:** Global Mangrove Watch v3 (2020) polygons rasterized to match Sentinel-2 grids.
 
