@@ -203,7 +203,7 @@
         "predicted_mangrove_pixels": 72573630,
         "gt_mangrove_pixels": 179569880,
         "predicted_hectares": 725736.3,
-        "predicted_stock_tco2e": 287683828.81,
+        "predicted_stock_tco2e": 287657678.11,
         "gt_hectares": 1795698.8,
         "gt_stock_tco2e": 711755147.69,
         "mangrove_fraction": 0.1904
@@ -214,7 +214,7 @@
         "predicted_mangrove_pixels": 65683374,
         "gt_mangrove_pixels": 179569880,
         "predicted_hectares": 656833.74,
-        "predicted_stock_tco2e": 260370667.99,
+        "predicted_stock_tco2e": 260347000.08,
         "gt_hectares": 1795698.8,
         "gt_stock_tco2e": 711755147.69,
         "mangrove_fraction": 0.1724
@@ -235,7 +235,7 @@
         "predicted_mangrove_pixels": 27826330,
         "gt_mangrove_pixels": 9194090,
         "predicted_hectares": 278263.3,
-        "predicted_stock_tco2e": 110304323.43,
+        "predicted_stock_tco2e": 110294296.68,
         "gt_hectares": 91940.9,
         "gt_stock_tco2e": 36442308.06,
         "mangrove_fraction": 0.3351
@@ -246,7 +246,7 @@
         "predicted_mangrove_pixels": 25194628,
         "gt_mangrove_pixels": 9194090,
         "predicted_hectares": 251946.28,
-        "predicted_stock_tco2e": 99872185.65,
+        "predicted_stock_tco2e": 99863107.18,
         "gt_hectares": 91940.9,
         "gt_stock_tco2e": 36442308.06,
         "mangrove_fraction": 0.3034
@@ -267,7 +267,7 @@
         "predicted_mangrove_pixels": 65495,
         "gt_mangrove_pixels": 580510,
         "predicted_hectares": 654.95,
-        "predicted_stock_tco2e": 259623.95,
+        "predicted_stock_tco2e": 259600.35,
         "gt_hectares": 5805.1,
         "gt_stock_tco2e": 2300948.14,
         "mangrove_fraction": 0.0141
@@ -278,7 +278,7 @@
         "predicted_mangrove_pixels": 48972,
         "gt_mangrove_pixels": 580510,
         "predicted_hectares": 489.72,
-        "predicted_stock_tco2e": 194126.33,
+        "predicted_stock_tco2e": 194108.68,
         "gt_hectares": 5805.1,
         "gt_stock_tco2e": 2300948.14,
         "mangrove_fraction": 0.0105

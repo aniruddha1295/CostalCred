@@ -1,0 +1,1894 @@
+openapi: 3.0.3
+info:
+  title: CoastalCred API
+  version: 0.1.0
+  description: |
+    REST API specification for **CoastalCred** -- a blockchain-based blue carbon
+    registry and MRV (Monitoring, Reporting, Verification) system for mangrove
+    ecosystems in India.
+
+    This spec covers 7 microservices designed for Sem VI (architecture phase).
+    Actual deployment as separate services is planned for Sem VII; during Sem VI
+    the codebase runs as a modular monolith.
+
+    **Technology stack:** Node.js + Express + TypeScript (services), Python +
+    FastAPI (ML API), PostgreSQL 15 + PostGIS (database), Polygon Amoy testnet
+    (blockchain).
+  contact:
+    name: CoastalCred Team
+    url: https://github.com/coastalcred
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local development server
+
+# ---------------------------------------------------------------------------
+# Security
+# ---------------------------------------------------------------------------
+security:
+  - BearerAuth: []
+
+components:
+  # =========================================================================
+  # Security Schemes
+  # =========================================================================
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from POST /auth/login
+
+  # =========================================================================
+  # Reusable Parameters
+  # =========================================================================
+  parameters:
+    PathId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Resource UUID
+
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Page number for pagination
+
+    LimitParam:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Items per page
+
+  # =========================================================================
+  # Reusable Responses
+  # =========================================================================
+  responses:
+    BadRequest:
+      description: Invalid request body or parameters.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: Missing or invalid JWT token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Forbidden:
+      description: Authenticated user lacks required role or permission.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: Requested resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Conflict:
+      description: Resource already exists or state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  # =========================================================================
+  # Schemas
+  # =========================================================================
+  schemas:
+    # --- Shared -----------------------------------------------------------
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+              example: "Field 'email' is required."
+            details:
+              type: object
+              additionalProperties: true
+
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 42
+
+    # --- Auth Service -----------------------------------------------------
+    RegisterRequest:
+      type: object
+      required: [email, password, full_name, role]
+      properties:
+        email:
+          type: string
+          format: email
+          example: ngo@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: securePassword123
+        full_name:
+          type: string
+          example: Rajesh Kumar
+        role:
+          type: string
+          enum: [ngo, corporate, verifier, admin]
+        organization:
+          type: string
+          example: Mangrove Trust India
+        phone:
+          type: string
+          example: "+919876543210"
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    AuthTokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: eyJhbGciOi...
+        token_type:
+          type: string
+          example: bearer
+        expires_in:
+          type: integer
+          description: Token lifetime in seconds.
+          example: 3600
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+        role:
+          type: string
+          enum: [ngo, corporate, verifier, admin]
+        organization:
+          type: string
+        phone:
+          type: string
+        kyc_status:
+          type: string
+          enum: [pending, submitted, verified, rejected]
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # --- Territory Service ------------------------------------------------
+    GeoJsonPolygon:
+      type: object
+      required: [type, coordinates]
+      properties:
+        type:
+          type: string
+          enum: [Polygon]
+        coordinates:
+          type: array
+          items:
+            type: array
+            items:
+              type: array
+              items:
+                type: number
+              minItems: 2
+              maxItems: 2
+          description: |
+            GeoJSON Polygon coordinates. Outer ring is the first array.
+            Example: [[[72.2, 21.5], [72.3, 21.5], [72.3, 21.6], [72.2, 21.6], [72.2, 21.5]]]
+
+    CreateTerritoryRequest:
+      type: object
+      required: [name, boundary, project_type]
+      properties:
+        name:
+          type: string
+          example: Gulf of Kutch Restoration Zone A
+        description:
+          type: string
+        boundary:
+          $ref: "#/components/schemas/GeoJsonPolygon"
+        project_type:
+          type: string
+          enum: [mangrove_restoration, mangrove_conservation, mangrove_afforestation]
+        baseline_condition:
+          type: string
+        project_start_date:
+          type: string
+          format: date
+
+    UpdateTerritoryBoundaryRequest:
+      type: object
+      required: [boundary]
+      properties:
+        boundary:
+          $ref: "#/components/schemas/GeoJsonPolygon"
+        reason:
+          type: string
+          description: Justification for boundary change (logged in audit trail).
+
+    Territory:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        boundary:
+          $ref: "#/components/schemas/GeoJsonPolygon"
+        area_hectares:
+          type: number
+          format: double
+          example: 125.75
+        project_type:
+          type: string
+          enum: [mangrove_restoration, mangrove_conservation, mangrove_afforestation]
+        baseline_ndvi:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [draft, submitted, active, suspended, retired]
+        project_start_date:
+          type: string
+          format: date
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TerritoryListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Territory"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    # --- DataIngestion Service --------------------------------------------
+    TriggerPipelineRequest:
+      type: object
+      required: [territory_id, job_type]
+      properties:
+        territory_id:
+          type: string
+          format: uuid
+        job_type:
+          type: string
+          enum: [sentinel2_fetch, gmw_download, ndvi_compute, composite_build]
+        parameters:
+          type: object
+          additionalProperties: true
+          description: |
+            Job-specific parameters. For sentinel2_fetch this includes
+            acquisition_start, acquisition_end, cloud_cover_max, and bands.
+          example:
+            acquisition_start: "2024-01-01"
+            acquisition_end: "2024-12-31"
+            cloud_cover_max: 20
+            bands: [B2, B3, B4, B8, B11, B12]
+
+    IngestionJob:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        territory_id:
+          type: string
+          format: uuid
+        job_type:
+          type: string
+          enum: [sentinel2_fetch, gmw_download, ndvi_compute, composite_build]
+        status:
+          type: string
+          enum: [queued, running, completed, failed, cancelled]
+        parameters:
+          type: object
+          additionalProperties: true
+        error_message:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    SatelliteComposite:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        territory_id:
+          type: string
+          format: uuid
+        satellite:
+          type: string
+          example: Sentinel-2
+        bands:
+          type: array
+          items:
+            type: string
+          example: [B2, B3, B4, B8, B11, B12]
+        acquisition_start:
+          type: string
+          format: date
+        acquisition_end:
+          type: string
+          format: date
+        cloud_cover_pct:
+          type: number
+        resolution_m:
+          type: number
+          example: 10.0
+        crs:
+          type: string
+          example: "EPSG:4326"
+        file_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # --- Verification Service ---------------------------------------------
+    SubmitVerificationRequest:
+      type: object
+      required: [territory_id]
+      properties:
+        territory_id:
+          type: string
+          format: uuid
+        baseline_composite_id:
+          type: string
+          format: uuid
+          description: Composite ID for the baseline year (e.g. 2020).
+        current_composite_id:
+          type: string
+          format: uuid
+          description: Composite ID for the current year (e.g. 2024).
+
+    VerificationRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        territory_id:
+          type: string
+          format: uuid
+        requested_by:
+          type: string
+          format: uuid
+        baseline_composite_id:
+          type: string
+          format: uuid
+        current_composite_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, in_progress, completed, rejected, expired]
+        model_runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelRun"
+        decision:
+          $ref: "#/components/schemas/VerificationDecision"
+        created_at:
+          type: string
+          format: date-time
+
+    ModelRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        model_name:
+          type: string
+          example: unet_resnet18
+        model_version:
+          type: string
+          example: "1.0.0"
+        baseline_hectares:
+          type: number
+          format: double
+        current_hectares:
+          type: number
+          format: double
+        delta_hectares:
+          type: number
+          format: double
+        metrics:
+          type: object
+          properties:
+            precision:
+              type: number
+              format: double
+            recall:
+              type: number
+              format: double
+            iou:
+              type: number
+              format: double
+            f1:
+              type: number
+              format: double
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    VerificationDecision:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        decided_by:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [approved, rejected, needs_revision]
+        confidence_score:
+          type: number
+          format: double
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ApproveRejectRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected, needs_revision]
+        confidence_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        notes:
+          type: string
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+          format: uuid
+        old_value:
+          type: object
+        new_value:
+          type: object
+        ip_address:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # --- CreditIssuance Service -------------------------------------------
+    IssueCreditRequest:
+      type: object
+      required: [territory_id, verification_id, amount_tco2e, vintage_year]
+      properties:
+        territory_id:
+          type: string
+          format: uuid
+        verification_id:
+          type: string
+          format: uuid
+        amount_tco2e:
+          type: number
+          format: double
+          description: Carbon credits in tCO2e, computed from IPCC Tier 1 methodology.
+          example: 3500.0
+        vintage_year:
+          type: integer
+          example: 2024
+        methodology:
+          type: string
+          default: IPCC_TIER1
+
+    CarbonCreditBatch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        territory_id:
+          type: string
+          format: uuid
+        verification_id:
+          type: string
+          format: uuid
+        token_id_erc1155:
+          type: integer
+          format: int64
+          nullable: true
+        amount_tco2e:
+          type: number
+          format: double
+        vintage_year:
+          type: integer
+        methodology:
+          type: string
+        confidence_score:
+          type: number
+          format: double
+          nullable: true
+        status:
+          type: string
+          enum: [pending, minted, active, retired, revoked]
+        minted_tx_hash:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    CreditListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CarbonCreditBatch"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    RetireCreditRequest:
+      type: object
+      required: [amount_tco2e, reason]
+      properties:
+        amount_tco2e:
+          type: number
+          format: double
+          description: Amount of credits to retire from this batch.
+        reason:
+          type: string
+          example: Voluntary offset for FY2024 corporate emissions.
+        beneficiary_name:
+          type: string
+          example: Acme Corp
+
+    CreditRetirement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        batch_id:
+          type: string
+          format: uuid
+        retired_by:
+          type: string
+          format: uuid
+        amount_tco2e:
+          type: number
+          format: double
+        reason:
+          type: string
+        beneficiary_name:
+          type: string
+        retirement_tx_hash:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    # --- Marketplace Service ----------------------------------------------
+    CreateListingRequest:
+      type: object
+      required: [batch_id, price_per_credit, quantity_available]
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        price_per_credit:
+          type: number
+          format: double
+          example: 450.00
+        currency:
+          type: string
+          default: INR
+          example: INR
+        quantity_available:
+          type: number
+          format: double
+          example: 500.0
+
+    MarketplaceListing:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        batch_id:
+          type: string
+          format: uuid
+        seller_id:
+          type: string
+          format: uuid
+        price_per_credit:
+          type: number
+          format: double
+        currency:
+          type: string
+        quantity_available:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [active, paused, sold_out, cancelled]
+        created_at:
+          type: string
+          format: date-time
+
+    ListingListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketplaceListing"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    CreateOrderRequest:
+      type: object
+      required: [listing_id, quantity]
+      properties:
+        listing_id:
+          type: string
+          format: uuid
+        quantity:
+          type: number
+          format: double
+          example: 50.0
+
+    MarketplaceOrder:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        listing_id:
+          type: string
+          format: uuid
+        buyer_id:
+          type: string
+          format: uuid
+        quantity:
+          type: number
+          format: double
+        total_price:
+          type: number
+          format: double
+        escrow_status:
+          type: string
+          enum: [pending, funded, released, refunded, disputed]
+        order_tx_hash:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    TradeHistoryResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketplaceOrder"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    # --- BlockchainAdapter Service ----------------------------------------
+    MintNftRequest:
+      type: object
+      required: [territory_id, owner_address]
+      properties:
+        territory_id:
+          type: string
+          format: uuid
+        owner_address:
+          type: string
+          pattern: "^0x[a-fA-F0-9]{40}$"
+          example: "0x1234567890abcdef1234567890abcdef12345678"
+        metadata_uri:
+          type: string
+          description: IPFS URI pointing to territory metadata JSON.
+          example: "ipfs://QmXyz..."
+
+    TransferTokenRequest:
+      type: object
+      required: [contract_address, from_address, to_address, token_id, amount]
+      properties:
+        contract_address:
+          type: string
+          pattern: "^0x[a-fA-F0-9]{40}$"
+        from_address:
+          type: string
+          pattern: "^0x[a-fA-F0-9]{40}$"
+        to_address:
+          type: string
+          pattern: "^0x[a-fA-F0-9]{40}$"
+        token_id:
+          type: integer
+          format: int64
+        amount:
+          type: integer
+          description: For ERC-1155 transfers. Use 1 for ERC-721.
+
+    BlockchainTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tx_hash:
+          type: string
+          example: "0xabc123..."
+        contract_address:
+          type: string
+        function_name:
+          type: string
+        from_address:
+          type: string
+        to_address:
+          type: string
+          nullable: true
+        parameters:
+          type: object
+        status:
+          type: string
+          enum: [pending, submitted, confirmed, failed, reverted]
+        block_number:
+          type: integer
+          format: int64
+          nullable: true
+        gas_used:
+          type: integer
+          format: int64
+          nullable: true
+        network:
+          type: string
+          example: polygon_amoy
+        created_at:
+          type: string
+          format: date-time
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+# ---------------------------------------------------------------------------
+# Tags
+# ---------------------------------------------------------------------------
+tags:
+  - name: Auth
+    description: |
+      User registration, authentication, and profile management.
+      Manages JWT tokens and role-based access (ngo, corporate, verifier, admin).
+  - name: Territory
+    description: |
+      Mangrove territory registration and management with PostGIS spatial
+      boundaries. Territories are the core entity -- each represents a GPS-bounded
+      restoration or conservation project.
+  - name: DataIngestion
+    description: |
+      Satellite data acquisition pipeline. Fetches Sentinel-2 composites via
+      Google Earth Engine, downloads GMW ground truth, and manages ingestion jobs.
+  - name: Verification
+    description: |
+      MRV verification workflow. Submits verification requests that trigger ML
+      model runs (NDVI, XGBoost, U-Net), then allows verifiers to approve or
+      reject based on model outputs and provenance documentation.
+  - name: CreditIssuance
+    description: |
+      Carbon credit lifecycle management. Issues ERC-1155 credit batches based on
+      approved verifications, using IPCC Tier 1 methodology for tCO2e calculation.
+      Supports credit retirement for corporate offsetting.
+  - name: Marketplace
+    description: |
+      Direct peer-to-peer carbon credit marketplace with automated escrow.
+      Sellers list credit batches; buyers place orders; escrow manages payment
+      flow without intermediaries.
+  - name: BlockchainAdapter
+    description: |
+      Abstraction layer for Polygon Amoy testnet interactions. Handles NFT
+      minting (ERC-721 TerritoryNFT), token transfers (ERC-1155 CarbonCredit),
+      and transaction status tracking.
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+  # =========================================================================
+  # Auth Service
+  # =========================================================================
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: |
+        Creates a new user account. The user must provide an email, password,
+        full name, and role. KYC status starts as 'pending'.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User registered successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/UserProfile"
+                  token:
+                    $ref: "#/components/schemas/AuthTokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate and obtain JWT token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/verify:
+    get:
+      tags: [Auth]
+      summary: Verify current JWT token validity
+      description: Returns the decoded token payload if the token is valid.
+      responses:
+        "200":
+          description: Token is valid.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                    example: true
+                  user_id:
+                    type: string
+                    format: uuid
+                  role:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/profile:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: User profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      tags: [Auth]
+      summary: Update current user profile
+      description: Allows updating mutable fields (full_name, organization, phone).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                full_name:
+                  type: string
+                organization:
+                  type: string
+                phone:
+                  type: string
+      responses:
+        "200":
+          description: Profile updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # =========================================================================
+  # Territory Service
+  # =========================================================================
+  /territories:
+    post:
+      tags: [Territory]
+      summary: Create a new territory
+      description: |
+        Registers a mangrove territory with a GeoJSON polygon boundary.
+        The server computes area_hectares from the polygon using PostGIS
+        ST_Area. Only users with role 'ngo' or 'admin' may create territories.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTerritoryRequest"
+      responses:
+        "201":
+          description: Territory created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Territory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags: [Territory]
+      summary: List territories
+      description: |
+        Returns paginated list of territories. Filters by owner, status, and
+        spatial bounding box. Admin and verifier roles can see all territories;
+        NGO users see only their own.
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, submitted, active, suspended, retired]
+        - name: owner_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: bbox
+          in: query
+          schema:
+            type: string
+          description: |
+            Bounding box filter as "minLon,minLat,maxLon,maxLat".
+            Uses PostGIS ST_Intersects for spatial query.
+          example: "72.0,21.0,73.0,22.0"
+      responses:
+        "200":
+          description: Paginated territory list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerritoryListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /territories/{id}:
+    get:
+      tags: [Territory]
+      summary: Get territory details
+      description: Returns full territory details including boundary geometry.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Territory details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Territory"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /territories/{id}/boundary:
+    patch:
+      tags: [Territory]
+      summary: Update territory boundary
+      description: |
+        Updates the GPS polygon boundary of a territory. Only allowed when
+        territory status is 'draft'. The change is recorded in the audit log
+        with the provided reason.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTerritoryBoundaryRequest"
+      responses:
+        "200":
+          description: Boundary updated. Returns updated territory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Territory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /territories/{id}/submit:
+    post:
+      tags: [Territory]
+      summary: Submit territory for verification
+      description: |
+        Transitions territory status from 'draft' to 'submitted'. This
+        triggers eligibility checks and makes the territory available for
+        verification requests.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Territory submitted for verification.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Territory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # =========================================================================
+  # DataIngestion Service
+  # =========================================================================
+  /ingestion/jobs:
+    post:
+      tags: [DataIngestion]
+      summary: Trigger a data ingestion pipeline job
+      description: |
+        Queues a new data ingestion job (Sentinel-2 fetch, GMW download, NDVI
+        compute, or composite build) for a specific territory. The job runs
+        asynchronously; poll GET /ingestion/jobs/{id} for status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TriggerPipelineRequest"
+      responses:
+        "202":
+          description: Job accepted and queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionJob"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags: [DataIngestion]
+      summary: List ingestion jobs
+      description: Returns paginated list of ingestion jobs, optionally filtered by territory or status.
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: territory_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [queued, running, completed, failed, cancelled]
+      responses:
+        "200":
+          description: Paginated job list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IngestionJob"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /ingestion/jobs/{id}:
+    get:
+      tags: [DataIngestion]
+      summary: Get ingestion job status
+      description: Returns current status and details of a specific ingestion job.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Job details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionJob"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /ingestion/composites:
+    get:
+      tags: [DataIngestion]
+      summary: List satellite composites
+      description: |
+        Returns available Sentinel-2 composites, optionally filtered by
+        territory. Each composite represents a cloud-free median image for
+        a specific acquisition period.
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: territory_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Paginated composite list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SatelliteComposite"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /ingestion/composites/{id}:
+    get:
+      tags: [DataIngestion]
+      summary: Get composite details
+      description: Returns metadata for a specific satellite composite.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Composite details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SatelliteComposite"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # =========================================================================
+  # Verification Service
+  # =========================================================================
+  /verifications:
+    post:
+      tags: [Verification]
+      summary: Submit a verification request
+      description: |
+        Creates a new verification request for a territory. Links baseline
+        (2020) and current (2024) satellite composites. Triggers automated
+        ML model runs (NDVI, XGBoost, U-Net) for mangrove cover comparison.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitVerificationRequest"
+      responses:
+        "201":
+          description: Verification request created; model runs queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags: [Verification]
+      summary: List verification requests
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: territory_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, in_progress, completed, rejected, expired]
+      responses:
+        "200":
+          description: Paginated verification request list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/VerificationRequest"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /verifications/{id}:
+    get:
+      tags: [Verification]
+      summary: Get verification request details
+      description: |
+        Returns full verification details including all model runs and
+        the verification decision (if one has been made).
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Verification request with model runs and decision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /verifications/{id}/decide:
+    post:
+      tags: [Verification]
+      summary: Approve or reject a verification request
+      description: |
+        Records a verification decision. Only users with the 'verifier' or
+        'admin' role may decide. The decision, confidence score, and notes
+        are stored and logged in the audit trail.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveRejectRequest"
+      responses:
+        "200":
+          description: Decision recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDecision"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /verifications/{id}/audit:
+    get:
+      tags: [Verification]
+      summary: Get audit trail for a verification request
+      description: |
+        Returns the immutable audit log entries associated with a specific
+        verification request, including status changes, model run completions,
+        and decisions.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Audit trail entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditLogEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # =========================================================================
+  # CreditIssuance Service
+  # =========================================================================
+  /credits:
+    post:
+      tags: [CreditIssuance]
+      summary: Issue a new carbon credit batch
+      description: |
+        Creates a carbon credit batch linked to an approved verification.
+        The amount_tco2e is computed using IPCC Tier 1 methodology:
+        flux = (current_hectares - baseline_hectares) * 7.0 * years.
+        Only 'admin' role may issue credits.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueCreditRequest"
+      responses:
+        "201":
+          description: Credit batch created with status 'pending'.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CarbonCreditBatch"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags: [CreditIssuance]
+      summary: List carbon credit batches
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: territory_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, minted, active, retired, revoked]
+        - name: vintage_year
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Paginated credit batch list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /credits/{id}:
+    get:
+      tags: [CreditIssuance]
+      summary: Get credit batch details
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Credit batch details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CarbonCreditBatch"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /credits/{id}/retire:
+    post:
+      tags: [CreditIssuance]
+      summary: Retire credits from a batch
+      description: |
+        Permanently retires a specified amount of credits from a batch.
+        Retired credits cannot be traded or transferred. This is the
+        mechanism by which corporates claim carbon offsets.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetireCreditRequest"
+      responses:
+        "200":
+          description: Credits retired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditRetirement"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /credits/{id}/mint:
+    post:
+      tags: [CreditIssuance]
+      summary: Trigger on-chain minting for a credit batch
+      description: |
+        Initiates the ERC-1155 minting process for a pending credit batch via
+        the BlockchainAdapter. Updates batch status to 'minted' upon successful
+        on-chain confirmation. Only 'admin' role may trigger minting.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "202":
+          description: Minting transaction submitted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch:
+                    $ref: "#/components/schemas/CarbonCreditBatch"
+                  transaction:
+                    $ref: "#/components/schemas/BlockchainTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # =========================================================================
+  # Marketplace Service
+  # =========================================================================
+  /marketplace/listings:
+    get:
+      tags: [Marketplace]
+      summary: Browse active marketplace listings
+      description: |
+        Returns paginated listings of carbon credits available for purchase.
+        Public endpoint (authentication optional for browsing).
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: min_price
+          in: query
+          schema:
+            type: number
+        - name: max_price
+          in: query
+          schema:
+            type: number
+        - name: vintage_year
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Active listings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingListResponse"
+    post:
+      tags: [Marketplace]
+      summary: Create a new listing
+      description: |
+        Lists a carbon credit batch for sale. Only the batch owner (seller)
+        may create a listing. The batch must have status 'active' or 'minted'.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateListingRequest"
+      responses:
+        "201":
+          description: Listing created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketplaceListing"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /marketplace/orders:
+    post:
+      tags: [Marketplace]
+      summary: Place an order (buy credits)
+      description: |
+        Creates an order for credits from a listing. An escrow record is
+        created with status 'pending'. The buyer must fund the escrow before
+        the trade executes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: Order created with escrow pending.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketplaceOrder"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /marketplace/orders/{id}/execute:
+    post:
+      tags: [Marketplace]
+      summary: Execute a funded trade
+      description: |
+        Executes the trade once escrow is funded. Transfers credits from
+        seller to buyer on-chain (via BlockchainAdapter) and releases
+        escrow funds to the seller.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Trade executed successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:
+                    $ref: "#/components/schemas/MarketplaceOrder"
+                  transaction:
+                    $ref: "#/components/schemas/BlockchainTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /marketplace/trades:
+    get:
+      tags: [Marketplace]
+      summary: Get trade history
+      description: |
+        Returns the authenticated user's trade history (both purchases and
+        sales). Admin role can view all trades.
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: Trade history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TradeHistoryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # =========================================================================
+  # BlockchainAdapter Service
+  # =========================================================================
+  /blockchain/mint-nft:
+    post:
+      tags: [BlockchainAdapter]
+      summary: Mint a TerritoryNFT (ERC-721)
+      description: |
+        Mints an ERC-721 TerritoryNFT on Polygon Amoy for a registered
+        territory. The NFT represents on-chain ownership of the territory
+        and links to IPFS metadata. Only 'admin' role may trigger minting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MintNftRequest"
+      responses:
+        "202":
+          description: Mint transaction submitted to Polygon Amoy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockchainTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /blockchain/transfer:
+    post:
+      tags: [BlockchainAdapter]
+      summary: Transfer tokens (ERC-721 or ERC-1155)
+      description: |
+        Initiates an on-chain token transfer on Polygon Amoy. Supports both
+        ERC-721 (TerritoryNFT) and ERC-1155 (CarbonCredit) transfers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferTokenRequest"
+      responses:
+        "202":
+          description: Transfer transaction submitted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockchainTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /blockchain/transactions/{id}:
+    get:
+      tags: [BlockchainAdapter]
+      summary: Get blockchain transaction status
+      description: |
+        Returns the current status of a blockchain transaction. Tracks the
+        lifecycle from 'pending' through 'submitted', 'confirmed', or 'failed'.
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Transaction details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockchainTransaction"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /blockchain/verify/{txHash}:
+    get:
+      tags: [BlockchainAdapter]
+      summary: Verify a transaction on-chain
+      description: |
+        Queries the Polygon Amoy blockchain to independently verify a
+        transaction's existence and confirmation status. Returns block
+        number, gas used, and confirmation count.
+      parameters:
+        - name: txHash
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The blockchain transaction hash to verify.
+          example: "0xabc123def456..."
+      responses:
+        "200":
+          description: On-chain verification result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tx_hash:
+                    type: string
+                  confirmed:
+                    type: boolean
+                  block_number:
+                    type: integer
+                    format: int64
+                  confirmations:
+                    type: integer
+                  gas_used:
+                    type: integer
+                    format: int64
+                  network:
+                    type: string
+                    example: polygon_amoy
+        "404":
+          description: Transaction not found on-chain.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /blockchain/contracts:
+    get:
+      tags: [BlockchainAdapter]
+      summary: List registered smart contracts
+      description: |
+        Returns the registry of deployed smart contracts (TerritoryNFT,
+        CarbonCredit, Marketplace) with their addresses and networks.
+      responses:
+        "200":
+          description: Contract registry.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        contract_name:
+                          type: string
+                          example: TerritoryNFT
+                        contract_address:
+                          type: string
+                          example: "0x1234...5678"
+                        network:
+                          type: string
+                          example: polygon_amoy
+                        is_active:
+                          type: boolean
+                        deployed_at:
+                          type: string
+                          format: date-time
+        "401":
+          $ref: "#/components/responses/Unauthorized"
